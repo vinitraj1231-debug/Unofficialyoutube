@@ -392,6 +392,59 @@ async function handleSearch(url, request, env, ctx) {
   });
 }
 
+async function handleSearchSongs(url, request, env, ctx) {
+  const q = url.searchParams.get("q");
+  if (!q) return err("Missing 'q' parameter", 400);
+  const limit = Math.min(Number(url.searchParams.get("limit") || 10) || 10, 50);
+  const hl = url.searchParams.get("hl") || env.DEFAULT_HL || "en";
+  const gl = url.searchParams.get("gl") || env.DEFAULT_GL || "US";
+  const baseUrl = url.origin;
+
+  return withCache(request, ctx, 300, async function () {
+    const data = await innertube(
+      "search",
+      "WEB",
+      {
+        query: q,
+        params: "EgIQAQ%3D%3D", // filter: videos only
+        client: undefined,
+      },
+      hl,
+      gl
+    );
+    const rawResults = parseSearch(data, limit);
+    const results = rawResults.map(function (item) {
+      const ytUrl = "https://www.youtube.com/watch?v=" + item.id;
+      return {
+        id: item.id,
+        title: item.title,
+        artist: item.author,
+        author: item.author,
+        duration: item.duration,
+        duration_seconds: item.lengthSeconds,
+        lengthSeconds: item.lengthSeconds,
+        views: item.views,
+        published: item.published,
+        thumbnail: item.thumbnail,
+        link: ytUrl,
+        url: ytUrl,
+        audio_url: baseUrl + "/audio?id=" + item.id,
+        proxy_url: baseUrl + "/proxy?id=" + item.id,
+        stream_url: baseUrl + "/stream?id=" + item.id,
+        redirect_url: baseUrl + "/redirect?id=" + item.id,
+      };
+    });
+
+    return {
+      ok: true,
+      service: "Telegram VC Music Search API",
+      query: q,
+      count: results.length,
+      results: results,
+    };
+  });
+}
+
 async function handleVideo(url, request, env, ctx) {
   const id = url.searchParams.get("id");
   if (!id) return err("Missing 'id' parameter", 400);
@@ -529,7 +582,7 @@ export default {
         service: "yt-innertube-api",
         version: VERSION,
         clients: PLAYER_ORDER,
-        routes: ["/health", "/search", "/video", "/stream", "/audio", "/proxy", "/redirect"],
+        routes: ["/health", "/search", "/search_songs", "/video", "/stream", "/audio", "/proxy", "/redirect"],
       });
     }
 
@@ -541,6 +594,8 @@ export default {
       switch (path) {
         case "/search":
           return await handleSearch(url, request, env, ctx);
+        case "/search_songs":
+          return await handleSearchSongs(url, request, env, ctx);
         case "/video":
           return await handleVideo(url, request, env, ctx);
         case "/stream":

@@ -9,36 +9,78 @@ Search, video metadata, audio stream URLs — with caching and client fallback.
 |--------|------|-------|-------|
 | GET | `/health` | - | status + version |
 | GET | `/search` | `q`, `limit`, `hl`, `gl` | search videos (cached 5 min) |
+| GET | `/search_songs` | `q`, `limit`, `hl`, `gl` | Telegram VC music bot song search with complete metadata & direct helper URLs |
 | GET | `/video` | `id`, `hl`, `gl` | metadata only (cached 30 min) |
 | GET | `/stream` | `id`, `itag`, `ttl` | all formats, returns URLs |
 | GET | `/audio` | `id`, `itag` | best audio format for bots |
 | GET | `/proxy` | `id`, `itag` | streams bytes, supports Range |
 | GET | `/redirect` | `id`, `itag` | 302 to best audio URL |
 
-## Deploy (wrangler)
+## How to Get Your Deployed Cloudflare Workers URL / Cloudflare URL Kaise Milega
 
-```bash
-npm install
-npx wrangler login
-npx wrangler deploy
-# optional auth:
-npx wrangler secret put API_SECRET
+1. **Via CLI (`wrangler`):**
+   ```bash
+   npm install
+   npx wrangler login
+   npx wrangler deploy
+   ```
+   After `npx wrangler deploy` completes, Terminal will print your worker URL:
+   `https://yt-innertube-api.<your-subdomain>.workers.dev`
+
+2. **Via Cloudflare Dashboard:**
+   - Log in to [Cloudflare Dashboard](https://dash.cloudflare.com/).
+   - Go to **Workers & Pages** in the side sidebar.
+   - Click on your worker **yt-innertube-api**.
+   - Under **Preview / Visit / Routes**, you will see your public URL (e.g., `https://yt-innertube-api.<subdomain>.workers.dev`).
+
+---
+
+## Telegram VC Music Bot Usage / Song Search API
+
+Use `/search_songs?q=kamleyasong` to search songs for Telegram VC music bots:
+
+### Example Request
+`GET https://<your-worker-url>/search_songs?q=kamleyasong`
+
+### Example Response
+```json
+{
+  "ok": true,
+  "service": "Telegram VC Music Search API",
+  "query": "kamleyasong",
+  "count": 10,
+  "results": [
+    {
+      "id": "videoId123",
+      "title": "Kamleya - Song Title",
+      "artist": "Artist Name",
+      "author": "Artist Name",
+      "duration": "04:12",
+      "duration_seconds": 252,
+      "lengthSeconds": 252,
+      "views": "10M views",
+      "published": "2 months ago",
+      "thumbnail": "https://i.ytimg.com/vi/videoId123/hqdefault.jpg",
+      "link": "https://www.youtube.com/watch?v=videoId123",
+      "url": "https://www.youtube.com/watch?v=videoId123",
+      "audio_url": "https://<your-worker-url>/audio?id=videoId123",
+      "proxy_url": "https://<your-worker-url>/proxy?id=videoId123",
+      "stream_url": "https://<your-worker-url>/stream?id=videoId123",
+      "redirect_url": "https://<your-worker-url>/redirect?id=videoId123"
+    }
+  ]
+}
 ```
 
-Deploy from dashboard: create a Worker, paste `src/index.js`, save & deploy.
-
-## Telegram bot usage
+### Playing in Telegram Music Bots (Pyrogram / FFmpeg / VC player):
 
 ```js
-// 1) search
-const r = await fetch(`${BASE}/search?q=${encodeURIComponent(query)}&limit=1`).then(r => r.json());
-const id = r.results[0].id;
+// 1) Search song
+const searchRes = await fetch(`${BASE_URL}/search_songs?q=${encodeURIComponent("kamleyasong")}`).then(r => r.json());
+const topSong = searchRes.results[0];
 
-// 2) best audio url
-const a = await fetch(`${BASE}/audio?id=${id}`).then(r => r.json());
-const url = a.audio.url;      // feed to ffmpeg / player
-// or stream through the worker (recommended if the direct URL 403s):
-const proxy = `${BASE}/proxy?id=${id}`;
+// 2) Pass proxy_url or audio_url to your bot player
+const streamUrl = topSong.proxy_url; // or fetch topSong.audio_url to get direct googlevideo audio stream
 ```
 
 ## Notes

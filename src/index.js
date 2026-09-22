@@ -346,22 +346,34 @@ function authOk(request, env, url) {
 /* -------------------- Cache -------------------- */
 
 async function withCache(request, ctx, ttl, producer) {
-  const cache = caches.default;
-  const cacheUrl = new URL(request.url);
-  cacheUrl.searchParams.delete("key");
-  const key = new Request(cacheUrl.toString(), { method: "GET" });
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  let key = null;
 
-  const hit = await cache.match(key);
-  if (hit) {
-    const headers = new Headers(hit.headers);
-    headers.set("X-Cache", "HIT");
-    headers.set("Access-Control-Allow-Origin", "*");
-    return new Response(hit.body, { status: hit.status, headers: headers });
+  if (cache) {
+    try {
+      const cacheUrl = new URL(request.url);
+      cacheUrl.searchParams.delete("key");
+      key = new Request(cacheUrl.toString(), { method: "GET" });
+
+      const hit = await cache.match(key);
+      if (hit) {
+        const headers = new Headers(hit.headers);
+        headers.set("X-Cache", "HIT");
+        headers.set("Access-Control-Allow-Origin", "*");
+        return new Response(hit.body, { status: hit.status, headers: headers });
+      }
+    } catch (e) { /* ignore cache errors */ }
   }
 
   const body = await producer();
   const res = json(body, 200, { "Cache-Control": "public, max-age=" + ttl });
-  ctx.waitUntil(cache.put(key, res.clone()));
+
+  if (cache && key && ctx && typeof ctx.waitUntil === "function") {
+    try {
+      ctx.waitUntil(cache.put(key, res.clone()));
+    } catch (e) { /* ignore cache put errors */ }
+  }
+
   res.headers.set("X-Cache", "MISS");
   return res;
 }

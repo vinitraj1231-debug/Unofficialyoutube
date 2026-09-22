@@ -1,13 +1,6 @@
 import assert from "node:assert";
 import worker from "./src/index.js";
 
-// Mock caches for local test execution
-globalThis.caches = {
-  default: {
-    match: async () => null,
-    put: async () => {},
-  },
-};
 
 async function runTests() {
   const env = {};

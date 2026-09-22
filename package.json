@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npx wrangler deploy --dry-run",
+    "build": "node -c src/index.js",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail"

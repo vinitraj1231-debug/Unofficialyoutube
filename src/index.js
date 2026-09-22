@@ -574,7 +574,7 @@ export default {
       return new Response(null, { status: 204, headers: CORS });
     }
 
-    const path = url.pathname.replace(/\/+$/, "") || "/";
+    const path = url.pathname.replace(/^\/+/, "/").replace(/\/+$/, "") || "/";
 
     if (path === "/health" || path === "/") {
       return json({

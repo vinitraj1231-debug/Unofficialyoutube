@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "echo 'Build complete'",
+    "build": "npx esbuild src/index.js --bundle --format=esm --outfile=dist/index.js --sourcemap",
     "test": "node test_routes.js",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail"
   },
   "devDependencies": {
+    "esbuild": "^0.25.0",
     "wrangler": "^3.90.0"
   }
 }

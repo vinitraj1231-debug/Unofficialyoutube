@@ -20,21 +20,29 @@ const VERSION = "1.0.0";
 /* -------------------- InnerTube clients -------------------- */
 
 const CLIENTS = {
+  ANDROID_VR: {
+    key: "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
+    clientName: "ANDROID_VR",
+    clientVersion: "1.54.38",
+    headerName: "93",
+    userAgent: "Mozilla/5.0 (Linux; Android 10; Quest 2) AppleWebKit/537.36",
+    extra: { deviceModel: "Quest 2", osName: "Android", osVersion: "10" },
+  },
   ANDROID: {
     key: "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
     clientName: "ANDROID",
-    clientVersion: "19.35.36",
+    clientVersion: "20.01.35",
     headerName: "3",
-    userAgent: "com.google.android.youtube/19.35.36 (Linux; U; Android 11) gzip",
-    extra: { androidSdkVersion: 30 },
+    userAgent: "com.google.android.youtube/20.01.35 (Linux; U; Android 12) gzip",
+    extra: { androidSdkVersion: 31, osName: "Android", osVersion: "12" },
   },
   IOS: {
     key: "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc",
     clientName: "IOS",
-    clientVersion: "19.35.3",
+    clientVersion: "20.01.2",
     headerName: "5",
-    userAgent: "com.google.ios.youtube/19.35.3 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)",
-    extra: { deviceModel: "iPhone16,2" },
+    userAgent: "com.google.ios.youtube/20.01.2 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X)",
+    extra: { deviceModel: "iPhone16,2", osName: "iOS", osVersion: "18.2" },
   },
   TVHTML5: {
     key: "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
@@ -57,7 +65,7 @@ const CLIENTS = {
 };
 
 // Order in which we try clients for /player.
-const PLAYER_ORDER = ["ANDROID", "IOS", "TVHTML5", "WEB"];
+const PLAYER_ORDER = ["ANDROID_VR", "ANDROID", "IOS", "TVHTML5", "WEB"];
 
 function buildContext(c, hl, gl) {
   const client = {

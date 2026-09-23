@@ -23,18 +23,18 @@ const CLIENTS = {
   ANDROID: {
     key: "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
     clientName: "ANDROID",
-    clientVersion: "19.35.36",
+    clientVersion: "20.10.32",
     headerName: "3",
-    userAgent: "com.google.android.youtube/19.35.36 (Linux; U; Android 11) gzip",
-    extra: { androidSdkVersion: 30 },
+    userAgent: "com.google.android.youtube/20.10.32 (Linux; U; Android 14) gzip",
+    extra: { androidSdkVersion: 34 },
   },
   IOS: {
     key: "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc",
     clientName: "IOS",
-    clientVersion: "19.35.3",
+    clientVersion: "20.08.3",
     headerName: "5",
-    userAgent: "com.google.ios.youtube/19.35.3 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)",
-    extra: { deviceModel: "iPhone16,2" },
+    userAgent: "com.google.ios.youtube/20.08.3 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)",
+    extra: { deviceModel: "iPhone16,2", osName: "iPhone", osVersion: "18.1.0" },
   },
   TVHTML5: {
     key: "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
@@ -85,7 +85,7 @@ function buildHeaders(c) {
   };
 }
 
-async function innertube(endpoint, clientName, bodyExtra, hl, gl) {
+async function innertube(endpoint, clientName, bodyExtra, hl, gl, visitorData) {
   const c = CLIENTS[clientName];
   const url =
     "https://www.youtube.com/youtubei/v1/" +
@@ -94,11 +94,16 @@ async function innertube(endpoint, clientName, bodyExtra, hl, gl) {
     c.key +
     "&prettyPrint=false";
 
+  const context = buildContext(c, hl, gl);
+  if (visitorData) {
+    context.client.visitorData = visitorData;
+  }
+
   const res = await fetch(url, {
     method: "POST",
     headers: buildHeaders(c),
     body: JSON.stringify({
-      context: buildContext(c, hl, gl),
+      context: context,
       ...bodyExtra,
     }),
   });
@@ -109,20 +114,41 @@ async function innertube(endpoint, clientName, bodyExtra, hl, gl) {
   return res.json();
 }
 
+/* -------------------- Visitor ID Cache -------------------- */
+
+let cachedVisitorData = null;
+
+async function getVisitorData(clientName, hl, gl) {
+  if (cachedVisitorData) return cachedVisitorData;
+  try {
+    const data = await innertube("visitor_id", clientName, {}, hl, gl);
+    if (data && data.responseContext && data.responseContext.visitorData) {
+      cachedVisitorData = data.responseContext.visitorData;
+    }
+  } catch (e) { /* ignore visitor_id error */ }
+  return cachedVisitorData;
+}
+
 /* -------------------- Player + fallback -------------------- */
 
 async function playerWithFallback(videoId, hl, gl) {
   const errors = [];
   for (const name of PLAYER_ORDER) {
     try {
-      const data = await innertube(
-        "player",
-        name,
-        { videoId: videoId, contentCheckOk: true, racyCheckOk: true },
-        hl,
-        gl
-      );
-      const status = data && data.playabilityStatus && data.playabilityStatus.status;
+      let visitorData = await getVisitorData(name, hl, gl);
+      const bodyExtra = { videoId: videoId, contentCheckOk: true, racyCheckOk: true };
+
+      let data = await innertube("player", name, bodyExtra, hl, gl, visitorData);
+      let status = data && data.playabilityStatus && data.playabilityStatus.status;
+
+      // If LOGIN_REQUIRED or status check fails, try refreshing visitorData once
+      if (!data || !data.streamingData || status === "LOGIN_REQUIRED") {
+        cachedVisitorData = null; // bust cache
+        visitorData = await getVisitorData(name, hl, gl);
+        data = await innertube("player", name, bodyExtra, hl, gl, visitorData);
+        status = data && data.playabilityStatus && data.playabilityStatus.status;
+      }
+
       if (data && data.streamingData) {
         return { data: data, client: name };
       }

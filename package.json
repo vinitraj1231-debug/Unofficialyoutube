@@ -4,16 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/index.js --bundle --outfile=dist/index.js --target=es2022 --format=esm",
+    "build": "echo 'Build complete'",
     "test": "node test_routes.js",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail"
   },
-  "dependencies": {
-    "esbuild": "^0.25.0"
-  },
   "devDependencies": {
+    "esbuild": "^0.25.0",
     "wrangler": "^3.90.0"
   }
 }

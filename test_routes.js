@@ -85,7 +85,22 @@ async function runTests() {
   assert.strictEqual(body.ok, true);
   assert.ok(Array.isArray(body.formats) && body.formats.length > 0);
 
-  // Test 11: Auth test with API_SECRET
+  // Test 11: GET /redirect?id=dQw4w9WgXcQ
+  console.log("Testing GET /redirect?id=dQw4w9WgXcQ...");
+  req = new Request("https://example.com/redirect?id=dQw4w9WgXcQ");
+  res = await worker.fetch(req, env, ctx);
+  assert.strictEqual(res.status, 302, "GET /redirect should return 302 redirect");
+  assert.ok(res.headers.get("Location"), "GET /redirect should set Location header");
+
+  // Test 12: GET /proxy?id=dQw4w9WgXcQ with Range
+  console.log("Testing GET /proxy?id=dQw4w9WgXcQ...");
+  req = new Request("https://example.com/proxy?id=dQw4w9WgXcQ", {
+    headers: { "Range": "bytes=0-100" }
+  });
+  res = await worker.fetch(req, env, ctx);
+  assert.ok(res.status === 200 || res.status === 206 || res.status === 403, "GET /proxy should return HTTP response from upstream or handled error");
+
+  // Test 13: Auth test with API_SECRET
   console.log("Testing Auth with API_SECRET...");
   const authEnv = { API_SECRET: "mysecret123" };
   req = new Request("https://example.com/health");

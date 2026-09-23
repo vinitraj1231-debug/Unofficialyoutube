@@ -20,14 +20,6 @@ const VERSION = "1.0.0";
 /* -------------------- InnerTube clients -------------------- */
 
 const CLIENTS = {
-  ANDROID_VR: {
-    key: "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
-    clientName: "ANDROID_VR",
-    clientVersion: "1.54.38",
-    headerName: "93",
-    userAgent: "Mozilla/5.0 (Linux; Android 10; Quest 2) AppleWebKit/537.36",
-    extra: { deviceModel: "Quest 2", osName: "Android", osVersion: "10" },
-  },
   ANDROID: {
     key: "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
     clientName: "ANDROID",
@@ -44,14 +36,37 @@ const CLIENTS = {
     userAgent: "com.google.ios.youtube/20.01.2 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X)",
     extra: { deviceModel: "iPhone16,2", osName: "iOS", osVersion: "18.2" },
   },
+  ANDROID_VR: {
+    key: "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
+    clientName: "ANDROID_VR",
+    clientVersion: "1.54.38",
+    headerName: "93",
+    userAgent: "Mozilla/5.0 (Linux; Android 10; Quest 2) AppleWebKit/537.36",
+    extra: { deviceModel: "Quest 2", osName: "Android", osVersion: "10" },
+  },
+  ANDROID_KIDS: {
+    key: "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
+    clientName: "ANDROID_KIDS",
+    clientVersion: "8.38.1",
+    headerName: "27",
+    userAgent: "com.google.android.apps.youtube.kids/8.38.1 (Linux; U; Android 12) gzip",
+    extra: { androidSdkVersion: 31, osName: "Android", osVersion: "12" },
+  },
+  IOS_KIDS: {
+    key: "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc",
+    clientName: "IOS_KIDS",
+    clientVersion: "8.38.1",
+    headerName: "28",
+    userAgent: "com.google.ios.youtubekids/8.38.1 (iPhone14,3; U; CPU iOS 17_5 like Mac OS X)",
+    extra: { deviceModel: "iPhone14,3", osName: "iOS", osVersion: "18.2" },
+  },
   TVHTML5: {
     key: "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
-    clientName: "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
-    clientVersion: "2.0",
-    headerName: "85",
-    userAgent: "Mozilla/5.0 (PlayStation; PlayStation 4/12.00) AppleWebKit/605.1.15",
+    clientName: "TVHTML5",
+    clientVersion: "7.20230405.08.01",
+    headerName: "7",
+    userAgent: "Mozilla/5.0 (SmartTV; Cobalt/Version)",
     extra: {},
-    thirdParty: { embedUrl: "https://www.youtube.com/" },
   },
   WEB: {
     key: "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
@@ -65,9 +80,66 @@ const CLIENTS = {
 };
 
 // Order in which we try clients for /player.
-const PLAYER_ORDER = ["ANDROID_VR", "ANDROID", "IOS", "TVHTML5", "WEB"];
+const PLAYER_ORDER = [
+  "ANDROID",
+  "IOS",
+  "ANDROID_VR",
+  "ANDROID_KIDS",
+  "IOS_KIDS",
+  "TVHTML5",
+  "WEB",
+];
 
-function buildContext(c, hl, gl) {
+/* -------------------- Visitor Data Cache -------------------- */
+
+const VISITOR_CACHE = {};
+
+async function fetchVisitorData(c) {
+  if (VISITOR_CACHE[c.clientName]) {
+    return VISITOR_CACHE[c.clientName];
+  }
+  try {
+    const url =
+      "https://www.youtube.com/youtubei/v1/visitor_id?key=" +
+      c.key +
+      "&prettyPrint=false";
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": c.userAgent,
+        Origin: "https://www.youtube.com",
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: c.clientName,
+            clientVersion: c.clientVersion,
+            hl: "en",
+            gl: "US",
+            ...c.extra,
+          },
+        },
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const vd = data && data.responseContext && data.responseContext.visitorData;
+    if (vd) {
+      VISITOR_CACHE[c.clientName] = vd;
+      return vd;
+    }
+  } catch (e) {
+    /* ignore visitor fetch errors */
+  }
+  return null;
+}
+
+function clearVisitorData(clientName) {
+  delete VISITOR_CACHE[clientName];
+}
+
+function buildContext(c, hl, gl, visitorData) {
   const client = {
     clientName: c.clientName,
     clientVersion: c.clientVersion,
@@ -75,14 +147,15 @@ function buildContext(c, hl, gl) {
     gl,
     utcOffsetMinutes: 0,
   };
+  if (visitorData) client.visitorData = visitorData;
   Object.assign(client, c.extra);
   const ctx = { client };
   if (c.thirdParty) ctx.thirdParty = c.thirdParty;
   return ctx;
 }
 
-function buildHeaders(c) {
-  return {
+function buildHeaders(c, visitorData) {
+  const headers = {
     "Content-Type": "application/json",
     "User-Agent": c.userAgent,
     "X-YouTube-Client-Name": c.headerName,
@@ -91,10 +164,16 @@ function buildHeaders(c) {
     Origin: "https://www.youtube.com",
     Referer: "https://www.youtube.com/",
   };
+  if (visitorData) headers["X-Goog-Visitor-Id"] = visitorData;
+  return headers;
 }
 
 async function innertube(endpoint, clientName, bodyExtra, hl, gl) {
   const c = CLIENTS[clientName];
+  if (!c) throw new Error("Unknown InnerTube client: " + clientName);
+
+  const visitorData = await fetchVisitorData(c);
+
   const url =
     "https://www.youtube.com/youtubei/v1/" +
     endpoint +
@@ -104,9 +183,9 @@ async function innertube(endpoint, clientName, bodyExtra, hl, gl) {
 
   const res = await fetch(url, {
     method: "POST",
-    headers: buildHeaders(c),
+    headers: buildHeaders(c, visitorData),
     body: JSON.stringify({
-      context: buildContext(c, hl, gl),
+      context: buildContext(c, hl, gl, visitorData),
       ...bodyExtra,
     }),
   });
@@ -134,8 +213,10 @@ async function playerWithFallback(videoId, hl, gl) {
       if (data && data.streamingData) {
         return { data: data, client: name };
       }
+      clearVisitorData(name);
       errors.push(name + ": " + (status || "no-streamingData"));
     } catch (e) {
+      clearVisitorData(name);
       errors.push(name + ": " + e.message);
     }
   }

@@ -2,7 +2,6 @@ name = "unofficialyoutube"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
-workers_dev = true
 
 # Optional: protect the endpoint with a shared secret.
 # Set it with:  npx wrangler secret put API_SECRET

@@ -11,6 +11,7 @@
     "tail": "wrangler tail"
   },
   "devDependencies": {
+    "esbuild": "^0.25.0",
     "wrangler": "^3.90.0"
   }
 }

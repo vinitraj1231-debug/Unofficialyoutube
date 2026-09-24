@@ -1,14 +1,16 @@
 {
-  "name": "unofficialyoutube",
+  "name": "yt-innertube-api",
   "version": "1.0.0",
+  "description": "Unofficial YouTube InnerTube API wrapper for Cloudflare Workers",
   "private": true,
   "type": "module",
+  "main": "src/index.js",
   "scripts": {
-    "build": "echo 'Build complete'",
-    "test": "node test_routes.js",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "test": "node test_routes.js",
+    "build": "echo 'Build complete'"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

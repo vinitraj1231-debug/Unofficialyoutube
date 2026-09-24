@@ -529,6 +529,7 @@ async function handleSearchSongs(url, request, env, ctx) {
       const rawResults = parseSearch(data, limit);
       const results = rawResults.map(function (item) {
         const ytUrl = "https://www.youtube.com/watch?v=" + item.id;
+        const proxyStreamUrl = baseUrl + "/proxy?id=" + item.id;
         return {
           id: item.id,
           title: item.title,
@@ -542,10 +543,12 @@ async function handleSearchSongs(url, request, env, ctx) {
           thumbnail: item.thumbnail,
           link: ytUrl,
           url: ytUrl,
-          audio_url: baseUrl + "/audio?id=" + item.id,
-          proxy_url: baseUrl + "/proxy?id=" + item.id,
-          stream_url: baseUrl + "/stream?id=" + item.id,
+          audio_url: proxyStreamUrl,
+          proxy_url: proxyStreamUrl,
+          stream_url: proxyStreamUrl,
           redirect_url: baseUrl + "/redirect?id=" + item.id,
+          audio_info_url: baseUrl + "/audio?id=" + item.id,
+          stream_info_url: baseUrl + "/stream?id=" + item.id,
         };
       });
 
@@ -639,17 +642,15 @@ async function handleRedirect(url, request, env) {
   const id = url.searchParams.get("id");
   if (!id) return err("Missing 'id' parameter", 400);
   const itag = url.searchParams.get("itag");
-  const hl = url.searchParams.get("hl") || env.DEFAULT_HL || "en";
-  const gl = url.searchParams.get("gl") || env.DEFAULT_GL || "US";
 
-  try {
-    const r = await playerWithFallback(id, hl, gl);
-    const best = chooseAudio(listFormats(r.data), itag);
-    if (!best) return err("No playable audio format found", 404);
-    return new Response(null, { status: 302, headers: Object.assign({ Location: best.url }, CORS) });
-  } catch (e) {
-    return err("Failed to resolve audio redirect URL", 502, e.message);
-  }
+  let proxyPath = "/proxy?id=" + encodeURIComponent(id);
+  if (itag) proxyPath += "&itag=" + encodeURIComponent(itag);
+
+  const proxyUrl = new URL(proxyPath, url.origin).toString();
+  return new Response(null, {
+    status: 302,
+    headers: Object.assign({ Location: proxyUrl }, CORS),
+  });
 }
 
 async function handleProxy(url, request, env) {
@@ -683,8 +684,7 @@ async function handleProxy(url, request, env) {
   async function fetchUpstream(targetUrl) {
     const headers = {
       "User-Agent": clientUA,
-      Origin: "https://www.youtube.com",
-      Referer: "https://www.youtube.com/",
+      Accept: "*/*",
     };
     const range = request.headers.get("Range");
     if (range) headers["Range"] = range;
@@ -694,6 +694,7 @@ async function handleProxy(url, request, env) {
     return await fetch(targetUrl, {
       method: request.method === "HEAD" ? "HEAD" : "GET",
       headers: headers,
+      redirect: "follow",
     });
   }
 

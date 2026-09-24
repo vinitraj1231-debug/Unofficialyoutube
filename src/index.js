@@ -6,12 +6,13 @@
  *  Routes:
  *    GET /health
  *    GET /search?q=<query>&limit=10
+ *    GET /search_songs?q=<query>&limit=10
  *    GET /video?id=<videoId>
- *    GET /stream?id=<videoId>&itag=<optional>
- *    GET /audio?id=<videoId>            -> best audio (json)
- *    GET /proxy?id=<videoId>&itag=<opt> -> streams media bytes (Range OK)
- *    GET /redirect?id=<videoId>         -> 302 to best audio url
- *    OPTIONS /                          -> CORS preflight
+ *    GET /stream?id=<videoId>&ttl=<optional>
+ *    GET /audio?id=<videoId>&itag=<optional>   -> best audio metadata (json)
+ *    GET /proxy?id=<videoId>&itag=<opt>        -> streams audio bytes (Range OK)
+ *    GET /redirect?id=<videoId>&itag=<optional> -> 302 to audio stream url
+ *    OPTIONS /                                 -> CORS preflight
  * ============================================================
  */
 
@@ -57,7 +58,7 @@ const CLIENTS = {
     clientName: "IOS_KIDS",
     clientVersion: "8.38.1",
     headerName: "28",
-    userAgent: "com.google.ios.youtubekids/8.38.1 (iPhone14,3; U; CPU iOS 17_5 like Mac OS X)",
+    userAgent: "com.google.ios.youtubekids/8.38.1 (iPhone14,3; U; CPU iOS 18_2 like Mac OS X)",
     extra: { deviceModel: "iPhone14,3", osName: "iOS", osVersion: "18.2" },
   },
   TVHTML5: {
@@ -92,11 +93,13 @@ const PLAYER_ORDER = [
 
 /* -------------------- Visitor Data Cache -------------------- */
 
-const VISITOR_CACHE = {};
+const VISITOR_CACHE = {}; // clientName -> { data, timestamp }
+const VISITOR_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 async function fetchVisitorData(c) {
-  if (VISITOR_CACHE[c.clientName]) {
-    return VISITOR_CACHE[c.clientName];
+  const cached = VISITOR_CACHE[c.clientName];
+  if (cached && (Date.now() - cached.timestamp < VISITOR_TTL_MS)) {
+    return cached.data;
   }
   try {
     const url =
@@ -126,7 +129,7 @@ async function fetchVisitorData(c) {
     const data = await res.json();
     const vd = data && data.responseContext && data.responseContext.visitorData;
     if (vd) {
-      VISITOR_CACHE[c.clientName] = vd;
+      VISITOR_CACHE[c.clientName] = { data: vd, timestamp: Date.now() };
       return vd;
     }
   } catch (e) {
@@ -279,8 +282,9 @@ function chooseAudio(formats, preferItag) {
     if (exact) return exact;
   }
 
-  // Preferred itags for Telegram VC bots: 140 (m4a 128k), 251 (opus 160k), 139 (m4a 48k)
-  const preferred = [251, 140, 250, 139];
+  // Preferred itags for Telegram VC bots and FFmpeg:
+  // 140 (m4a/aac 128k), 251 (opus 160k), 250 (opus 70k), 139 (m4a/aac 48k)
+  const preferred = [140, 251, 250, 139];
   for (const tag of preferred) {
     const hit = pool.find(function (f) { return f.itag === tag; });
     if (hit) return hit;
@@ -455,6 +459,10 @@ async function withCache(request, ctx, ttl, producer) {
   }
 
   const body = await producer();
+  if (body && body.ok === false) {
+    return json(body, body.status || 502);
+  }
+
   const res = json(body, 200, { "Cache-Control": "public, max-age=" + ttl });
 
   if (cache && key && ctx && typeof ctx.waitUntil === "function") {
@@ -477,19 +485,23 @@ async function handleSearch(url, request, env, ctx) {
   const gl = url.searchParams.get("gl") || env.DEFAULT_GL || "US";
 
   return withCache(request, ctx, 300, async function () {
-    const data = await innertube(
-      "search",
-      "WEB",
-      {
-        query: q,
-        params: "EgIQAQ%3D%3D", // filter: videos only
-        client: undefined,
-      },
-      hl,
-      gl
-    );
-    const results = parseSearch(data, limit);
-    return { ok: true, query: q, count: results.length, results: results };
+    try {
+      const data = await innertube(
+        "search",
+        "WEB",
+        {
+          query: q,
+          params: "EgIQAQ%3D%3D", // filter: videos only
+          client: undefined,
+        },
+        hl,
+        gl
+      );
+      const results = parseSearch(data, limit);
+      return { ok: true, query: q, count: results.length, results: results };
+    } catch (e) {
+      return { ok: false, status: 502, error: "Search failed", detail: e.message };
+    }
   });
 }
 
@@ -502,47 +514,51 @@ async function handleSearchSongs(url, request, env, ctx) {
   const baseUrl = url.origin;
 
   return withCache(request, ctx, 300, async function () {
-    const data = await innertube(
-      "search",
-      "WEB",
-      {
-        query: q,
-        params: "EgIQAQ%3D%3D", // filter: videos only
-        client: undefined,
-      },
-      hl,
-      gl
-    );
-    const rawResults = parseSearch(data, limit);
-    const results = rawResults.map(function (item) {
-      const ytUrl = "https://www.youtube.com/watch?v=" + item.id;
-      return {
-        id: item.id,
-        title: item.title,
-        artist: item.author,
-        author: item.author,
-        duration: item.duration,
-        duration_seconds: item.lengthSeconds,
-        lengthSeconds: item.lengthSeconds,
-        views: item.views,
-        published: item.published,
-        thumbnail: item.thumbnail,
-        link: ytUrl,
-        url: ytUrl,
-        audio_url: baseUrl + "/audio?id=" + item.id,
-        proxy_url: baseUrl + "/proxy?id=" + item.id,
-        stream_url: baseUrl + "/stream?id=" + item.id,
-        redirect_url: baseUrl + "/redirect?id=" + item.id,
-      };
-    });
+    try {
+      const data = await innertube(
+        "search",
+        "WEB",
+        {
+          query: q,
+          params: "EgIQAQ%3D%3D", // filter: videos only
+          client: undefined,
+        },
+        hl,
+        gl
+      );
+      const rawResults = parseSearch(data, limit);
+      const results = rawResults.map(function (item) {
+        const ytUrl = "https://www.youtube.com/watch?v=" + item.id;
+        return {
+          id: item.id,
+          title: item.title,
+          artist: item.author,
+          author: item.author,
+          duration: item.duration,
+          duration_seconds: item.lengthSeconds,
+          lengthSeconds: item.lengthSeconds,
+          views: item.views,
+          published: item.published,
+          thumbnail: item.thumbnail,
+          link: ytUrl,
+          url: ytUrl,
+          audio_url: baseUrl + "/audio?id=" + item.id,
+          proxy_url: baseUrl + "/proxy?id=" + item.id,
+          stream_url: baseUrl + "/stream?id=" + item.id,
+          redirect_url: baseUrl + "/redirect?id=" + item.id,
+        };
+      });
 
-    return {
-      ok: true,
-      service: "Telegram VC Music Search API",
-      query: q,
-      count: results.length,
-      results: results,
-    };
+      return {
+        ok: true,
+        service: "Telegram VC Music Search API",
+        query: q,
+        count: results.length,
+        results: results,
+      };
+    } catch (e) {
+      return { ok: false, status: 502, error: "Song search failed", detail: e.message };
+    }
   });
 }
 
@@ -553,16 +569,20 @@ async function handleVideo(url, request, env, ctx) {
   const gl = url.searchParams.get("gl") || env.DEFAULT_GL || "US";
 
   return withCache(request, ctx, 1800, async function () {
-    const r = await playerWithFallback(id, hl, gl);
-    const formats = listFormats(r.data);
-    return {
-      ok: true,
-      client: r.client,
-      video: videoMeta(r.data),
-      playability: (r.data.playabilityStatus && r.data.playabilityStatus.status) || null,
-      formatsCount: formats.length,
-      keywords: (r.data.videoDetails && r.data.videoDetails.keywords) || [],
-    };
+    try {
+      const r = await playerWithFallback(id, hl, gl);
+      const formats = listFormats(r.data);
+      return {
+        ok: true,
+        client: r.client,
+        video: videoMeta(r.data),
+        playability: (r.data.playabilityStatus && r.data.playabilityStatus.status) || null,
+        formatsCount: formats.length,
+        keywords: (r.data.videoDetails && r.data.videoDetails.keywords) || [],
+      };
+    } catch (e) {
+      return { ok: false, status: 502, error: "Failed to fetch video details", detail: e.message };
+    }
   });
 }
 
@@ -574,14 +594,18 @@ async function handleStream(url, request, env, ctx) {
   const ttl = Math.max(60, Math.min(Number(url.searchParams.get("ttl") || 900) || 900, 3600));
 
   return withCache(request, ctx, ttl, async function () {
-    const r = await playerWithFallback(id, hl, gl);
-    const formats = listFormats(r.data);
-    return {
-      ok: true,
-      client: r.client,
-      video: videoMeta(r.data),
-      formats: formats,
-    };
+    try {
+      const r = await playerWithFallback(id, hl, gl);
+      const formats = listFormats(r.data);
+      return {
+        ok: true,
+        client: r.client,
+        video: videoMeta(r.data),
+        formats: formats,
+      };
+    } catch (e) {
+      return { ok: false, status: 502, error: "Failed to fetch stream details", detail: e.message };
+    }
   });
 }
 
@@ -593,17 +617,21 @@ async function handleAudio(url, request, env, ctx) {
   const gl = url.searchParams.get("gl") || env.DEFAULT_GL || "US";
 
   return withCache(request, ctx, 900, async function () {
-    const r = await playerWithFallback(id, hl, gl);
-    const formats = listFormats(r.data);
-    const best = chooseAudio(formats, itag);
-    if (!best) return { ok: false, error: "No playable audio format found" };
-    return {
-      ok: true,
-      client: r.client,
-      video: videoMeta(r.data),
-      audio: best,
-      expiresHint: "googlevideo urls are short-lived (~6h) and may be IP-bound; re-fetch when expired",
-    };
+    try {
+      const r = await playerWithFallback(id, hl, gl);
+      const formats = listFormats(r.data);
+      const best = chooseAudio(formats, itag);
+      if (!best) return { ok: false, status: 404, error: "No playable audio format found" };
+      return {
+        ok: true,
+        client: r.client,
+        video: videoMeta(r.data),
+        audio: best,
+        expiresHint: "googlevideo urls are short-lived (~6h) and may be IP-bound; re-fetch when expired",
+      };
+    } catch (e) {
+      return { ok: false, status: 502, error: "Failed to fetch audio stream", detail: e.message };
+    }
   });
 }
 
@@ -614,10 +642,14 @@ async function handleRedirect(url, request, env) {
   const hl = url.searchParams.get("hl") || env.DEFAULT_HL || "en";
   const gl = url.searchParams.get("gl") || env.DEFAULT_GL || "US";
 
-  const r = await playerWithFallback(id, hl, gl);
-  const best = chooseAudio(listFormats(r.data), itag);
-  if (!best) return err("No playable audio format found", 404);
-  return new Response(null, { status: 302, headers: Object.assign({ Location: best.url }, CORS) });
+  try {
+    const r = await playerWithFallback(id, hl, gl);
+    const best = chooseAudio(listFormats(r.data), itag);
+    if (!best) return err("No playable audio format found", 404);
+    return new Response(null, { status: 302, headers: Object.assign({ Location: best.url }, CORS) });
+  } catch (e) {
+    return err("Failed to resolve audio redirect URL", 502, e.message);
+  }
 }
 
 async function handleProxy(url, request, env) {
@@ -628,34 +660,70 @@ async function handleProxy(url, request, env) {
   const gl = url.searchParams.get("gl") || env.DEFAULT_GL || "US";
 
   let mediaUrl = null;
+  let clientName = "ANDROID";
 
   if (id) {
-    const r = await playerWithFallback(id, hl, gl);
-    const best = chooseAudio(listFormats(r.data), itag);
-    if (!best) return err("No playable audio format found", 404);
-    mediaUrl = best.url;
+    try {
+      const r = await playerWithFallback(id, hl, gl);
+      const best = chooseAudio(listFormats(r.data), itag);
+      if (!best) return err("No playable audio format found", 404);
+      mediaUrl = best.url;
+      clientName = r.client;
+    } catch (e) {
+      return err("Failed to retrieve audio stream", 502, e.message);
+    }
   } else if (directUrl && env.ALLOW_OPEN_PROXY === "true") {
     mediaUrl = directUrl;
   } else {
     return err("Provide 'id' (or enable open proxy via ALLOW_OPEN_PROXY)", 400);
   }
 
-  const headers = {
-    "User-Agent": CLIENTS.ANDROID.userAgent,
-    Origin: "https://www.youtube.com",
-  };
-  const range = request.headers.get("Range");
-  if (range) headers["Range"] = range;
+  const clientUA = (CLIENTS[clientName] && CLIENTS[clientName].userAgent) || CLIENTS.ANDROID.userAgent;
 
-  const upstream = await fetch(mediaUrl, {
-    method: request.method === "HEAD" ? "HEAD" : "GET",
-    headers: headers,
-  });
+  async function fetchUpstream(targetUrl) {
+    const headers = {
+      "User-Agent": clientUA,
+      Origin: "https://www.youtube.com",
+      Referer: "https://www.youtube.com/",
+    };
+    const range = request.headers.get("Range");
+    if (range) headers["Range"] = range;
+    const accept = request.headers.get("Accept");
+    if (accept) headers["Accept"] = accept;
+
+    return await fetch(targetUrl, {
+      method: request.method === "HEAD" ? "HEAD" : "GET",
+      headers: headers,
+    });
+  }
+
+  let upstream = await fetchUpstream(mediaUrl);
+
+  // If upstream returns 403, 410, or 404, retry once with fresh visitor/player data
+  if (id && (upstream.status === 403 || upstream.status === 410 || upstream.status === 404)) {
+    for (const name of PLAYER_ORDER) {
+      clearVisitorData(name);
+    }
+    try {
+      const r = await playerWithFallback(id, hl, gl);
+      const best = chooseAudio(listFormats(r.data), itag);
+      if (best && best.url && best.url !== mediaUrl) {
+        mediaUrl = best.url;
+        clientName = r.client;
+        upstream = await fetchUpstream(mediaUrl);
+      }
+    } catch (e) {
+      /* ignore retry error and return original response */
+    }
+  }
 
   const outHeaders = new Headers(CORS);
   for (const h of ["content-type", "content-length", "content-range", "accept-ranges", "last-modified"]) {
     const v = upstream.headers.get(h);
     if (v) outHeaders.set(h, v);
+  }
+  if (!outHeaders.has("accept-ranges")) {
+    outHeaders.set("accept-ranges", "bytes");
   }
   outHeaders.set("Cache-Control", "public, max-age=3600");
 

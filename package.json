@@ -1,5 +1,5 @@
 {
-  "name": "yt-innertube-api",
+  "name": "unofficialyoutube",
   "version": "1.0.0",
   "description": "Unofficial YouTube InnerTube API wrapper for Cloudflare Workers",
   "private": true,

@@ -10,10 +10,10 @@
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
     "test": "node test_routes.js",
-    "build": "echo 'Build complete'"
+    "build": "esbuild src/index.js --bundle --format=esm --outfile=dist/index.js"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",
-    "wrangler": "^3.90.0"
+    "wrangler": "^3.114.17"
   }
 }

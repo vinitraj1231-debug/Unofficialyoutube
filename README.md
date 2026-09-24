@@ -63,24 +63,35 @@ Use `/search_songs?q=kamleyasong` to search songs for Telegram VC music bots:
       "thumbnail": "https://i.ytimg.com/vi/videoId123/hqdefault.jpg",
       "link": "https://www.youtube.com/watch?v=videoId123",
       "url": "https://www.youtube.com/watch?v=videoId123",
-      "audio_url": "https://<your-worker-url>/audio?id=videoId123",
+      "audio_url": "https://<your-worker-url>/proxy?id=videoId123",
       "proxy_url": "https://<your-worker-url>/proxy?id=videoId123",
-      "stream_url": "https://<your-worker-url>/stream?id=videoId123",
-      "redirect_url": "https://<your-worker-url>/redirect?id=videoId123"
+      "stream_url": "https://<your-worker-url>/proxy?id=videoId123",
+      "redirect_url": "https://<your-worker-url>/redirect?id=videoId123",
+      "audio_info_url": "https://<your-worker-url>/audio?id=videoId123",
+      "stream_info_url": "https://<your-worker-url>/stream?id=videoId123"
     }
   ]
 }
 ```
 
-### Playing in Telegram Music Bots (Pyrogram / FFmpeg / VC player):
+### Playing in Telegram Music Bots (PyTgCalls / Pyrogram / FFmpeg):
 
-```js
-// 1) Search song
-const searchRes = await fetch(`${BASE_URL}/search_songs?q=${encodeURIComponent("kamleyasong")}`).then(r => r.json());
-const topSong = searchRes.results[0];
+```python
+# Python PyTgCalls Example
+import aiohttp
+from pytgcalls import PyTgCalls
+from pytgcalls.types import AudioPiped
 
-// 2) Pass proxy_url or audio_url to your bot player
-const streamUrl = topSong.proxy_url; // or fetch topSong.audio_url to get direct googlevideo audio stream
+# 1) Search song
+async with aiohttp.ClientSession() as session:
+    async with session.get(f"{BASE_URL}/search_songs?q={song_name}") as resp:
+        data = await resp.json()
+        top_song = data["results"][0]
+
+# 2) Pass audio_url or proxy_url directly to PyTgCalls AudioPiped
+# (This streams playable audio bytes to FFmpeg and prevents 403 Forbidden / TimeoutError)
+stream_url = top_song["audio_url"]  # or top_song["proxy_url"]
+await call_py.play(chat_id, AudioPiped(stream_url))
 ```
 
 ## Notes

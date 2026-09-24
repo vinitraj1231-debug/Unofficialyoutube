@@ -15,6 +15,14 @@ async function runTests() {
   let body = await res.json();
   assert.strictEqual(body.ok, true);
   assert.strictEqual(body.service, "Telegram VC Music Search API");
+  if (body.results && body.results.length > 0) {
+    const song = body.results[0];
+    assert.ok(song.proxy_url.includes("/proxy?id="), "proxy_url should point to /proxy");
+    assert.ok(song.audio_url.includes("/proxy?id="), "audio_url should point to /proxy stream");
+    assert.ok(song.stream_url.includes("/proxy?id="), "stream_url should point to /proxy stream");
+    assert.ok(song.redirect_url.includes("/redirect?id="), "redirect_url should point to /redirect");
+    assert.ok(song.audio_info_url.includes("/audio?id="), "audio_info_url should point to /audio info");
+  }
 
   // Test 2: GET /search_songs/ with trailing slash
   req = new Request("https://example.com/search_songs/?q=test");
@@ -90,7 +98,7 @@ async function runTests() {
   req = new Request("https://example.com/redirect?id=dQw4w9WgXcQ");
   res = await worker.fetch(req, env, ctx);
   assert.strictEqual(res.status, 302, "GET /redirect should return 302 redirect");
-  assert.ok(res.headers.get("Location"), "GET /redirect should set Location header");
+  assert.ok(res.headers.get("Location").includes("/proxy?id=dQw4w9WgXcQ"), "GET /redirect Location should redirect to /proxy");
 
   // Test 12: GET /proxy?id=dQw4w9WgXcQ with Range
   console.log("Testing GET /proxy?id=dQw4w9WgXcQ...");

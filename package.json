@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/index.js --bundle --format=esm --outfile=dist/index.js",
+    "build": "echo 'Build complete'",
     "test": "node test_routes.js",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

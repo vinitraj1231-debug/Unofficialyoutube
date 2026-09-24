@@ -1,17 +1,19 @@
 {
   "name": "unofficialyoutube",
   "version": "1.0.0",
+  "description": "Unofficial YouTube InnerTube API wrapper for Cloudflare Workers",
   "private": true,
   "type": "module",
+  "main": "src/index.js",
   "scripts": {
-    "build": "echo 'Build complete'",
-    "test": "node test_routes.js",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "test": "node test_routes.js",
+    "build": "esbuild src/index.js --bundle --format=esm --outfile=dist/index.js"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",
-    "wrangler": "^3.90.0"
+    "wrangler": "^3.114.17"
   }
 }

@@ -74,6 +74,23 @@ async function runTests() {
   assert.ok(body.video.title, "video meta should contain title");
   assert.ok(body.playability, "video meta should contain playability status");
 
+  // Test 6b: GET /video with full YouTube URLs
+  console.log("6b. Testing GET /video with full YouTube URLs...");
+  const sampleUrls = [
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "https://youtu.be/dQw4w9WgXcQ",
+    "https://youtube.com/shorts/dQw4w9WgXcQ?feature=share",
+    "https://www.youtube.com/embed/dQw4w9WgXcQ",
+  ];
+  for (const urlStr of sampleUrls) {
+    req = new Request("https://example.com/video?id=" + encodeURIComponent(urlStr));
+    res = await worker.fetch(req, env, ctx);
+    assert.strictEqual(res.status, 200, `GET /video with URL ${urlStr} should return HTTP 200`);
+    body = await res.json();
+    assert.strictEqual(body.ok, true);
+    assert.strictEqual(body.video.id, "dQw4w9WgXcQ");
+  }
+
   // Test 7: GET /stream with valid YouTube ID
   console.log("7. Testing GET /stream?id=dQw4w9WgXcQ...");
   req = new Request("https://example.com/stream?id=dQw4w9WgXcQ");

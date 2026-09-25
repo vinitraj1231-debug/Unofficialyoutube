@@ -659,14 +659,43 @@ function err(message, code = "INTERNAL_ERROR", status = 500, detail = null) {
 const VIDEO_ID_REGEX = /^[a-zA-Z0-9_-]{11}$/;
 const PARAM_PATTERN = /^[a-zA-Z0-9_-]{2,10}$/;
 
-function validateVideoId(id) {
-  if (!id) {
+function extractVideoId(input) {
+  if (!input) return null;
+  const str = String(input).trim();
+  if (VIDEO_ID_REGEX.test(str)) return str;
+
+  try {
+    const urlStr = str.startsWith("http://") || str.startsWith("https://") ? str : "https://" + str;
+    const url = new URL(urlStr);
+
+    if (url.hostname.includes("youtube.com") || url.hostname.includes("youtube-nocookie.com")) {
+      if (url.pathname === "/watch") {
+        const v = url.searchParams.get("v");
+        if (v && VIDEO_ID_REGEX.test(v)) return v;
+      }
+      const match = url.pathname.match(/^\/(?:embed|v|shorts|live)\/([a-zA-Z0-9_-]{11})/);
+      if (match && match[1]) return match[1];
+    }
+    if (url.hostname === "youtu.be" || url.hostname.endsWith(".youtu.be")) {
+      const id = url.pathname.replace(/^\/+/, "").split("/")[0];
+      if (id && VIDEO_ID_REGEX.test(id)) return id;
+    }
+  } catch (e) {
+    /* ignore invalid URL parsing */
+  }
+
+  return null;
+}
+
+function validateVideoId(raw) {
+  if (!raw) {
     return { ok: false, error: err("Missing 'id' parameter", "MISSING_PARAMETER", 400) };
   }
-  if (!VIDEO_ID_REGEX.test(id)) {
+  const extracted = extractVideoId(raw);
+  if (!extracted) {
     return { ok: false, error: err("Invalid YouTube video ID format", "INVALID_VIDEO_ID", 400) };
   }
-  return { ok: true, id };
+  return { ok: true, id: extracted };
 }
 
 function validateLanguageCode(val, fallback) {

@@ -704,6 +704,22 @@ async function handleStream(url, request, env, ctx) {
     }
   });
 }
+async function resolveAudioStream(id, itag, hl, gl) {
+  const r = await playerWithFallback(id, hl, gl);
+  const formats = listFormats(r.data);
+  const best = chooseAudio(formats, itag);
+  if (!best || !best.url) {
+    const errObj = new Error("No playable audio format found for this video");
+    errObj.code = "NO_AUDIO_FORMAT";
+    errObj.status = 404;
+    throw errObj;
+  }
+  return {
+    audio: best,
+    client: r.client,
+    data: r.data
+  };
+}
 async function handleAudio(url, request, env, ctx) {
   const idVal = validateVideoId(url.searchParams.get("id"));
   if (!idVal.ok) return idVal.error;
@@ -713,28 +729,18 @@ async function handleAudio(url, request, env, ctx) {
   const gl = validateLanguageCode(url.searchParams.get("gl"), env.DEFAULT_GL || "US");
   return withCache(request, ctx, 300, async function() {
     try {
-      const r = await playerWithFallback(id, hl, gl);
-      const formats = listFormats(r.data);
-      const best = chooseAudio(formats, itag);
-      if (!best) {
-        return {
-          ok: false,
-          status: 404,
-          code: "NO_AUDIO_FORMAT",
-          error: "No playable audio format found for this video"
-        };
-      }
-      const meta = videoMeta(r.data);
+      const res = await resolveAudioStream(id, itag, hl, gl);
+      const meta = videoMeta(res.data);
       return {
         ok: true,
-        client: r.client,
+        client: res.client,
         video: {
           id: meta.id,
           title: meta.title,
           author: meta.author,
           lengthSeconds: meta.lengthSeconds
         },
-        audio: best,
+        audio: res.audio,
         expiresHint: "Media URLs are temporary and should be refreshed when expired"
       };
     } catch (e) {
@@ -756,15 +762,10 @@ async function handleRedirect(url, request, env) {
   const hl = validateLanguageCode(url.searchParams.get("hl"), env.DEFAULT_HL || "en");
   const gl = validateLanguageCode(url.searchParams.get("gl"), env.DEFAULT_GL || "US");
   try {
-    const r = await playerWithFallback(id, hl, gl);
-    const formats = listFormats(r.data);
-    const best = chooseAudio(formats, itag);
-    if (!best || !best.url) {
-      return err("No playable audio format found for redirect", "NO_AUDIO_FORMAT", 404);
-    }
+    const res = await resolveAudioStream(id, itag, hl, gl);
     return new Response(null, {
       status: 302,
-      headers: Object.assign({ Location: best.url }, CORS_HEADERS, {
+      headers: Object.assign({ Location: res.audio.url }, CORS_HEADERS, {
         "Cache-Control": "no-store, no-cache, must-revalidate"
       })
     });
@@ -784,16 +785,12 @@ async function handleProxy(url, request, env) {
   const itag = url.searchParams.get("itag");
   const hl = validateLanguageCode(url.searchParams.get("hl"), env.DEFAULT_HL || "en");
   const gl = validateLanguageCode(url.searchParams.get("gl"), env.DEFAULT_GL || "US");
-  let mediaUrl = null;
-  let clientName = "ANDROID";
+  async function getFreshAudioStream() {
+    return await resolveAudioStream(id, itag, hl, gl);
+  }
+  let streamInfo;
   try {
-    const r = await playerWithFallback(id, hl, gl);
-    const best = chooseAudio(listFormats(r.data), itag);
-    if (!best || !best.url) {
-      return err("No playable audio format found to proxy", "NO_AUDIO_FORMAT", 404);
-    }
-    mediaUrl = best.url;
-    clientName = r.client;
+    streamInfo = await getFreshAudioStream();
   } catch (e) {
     return err(
       e.message || "Failed to retrieve audio stream for proxy",
@@ -802,31 +799,39 @@ async function handleProxy(url, request, env) {
       e.detail || null
     );
   }
-  try {
-    const parsedMediaUrl = new URL(mediaUrl);
-    if (parsedMediaUrl.protocol !== "https:" || !parsedMediaUrl.hostname.endsWith(".googlevideo.com")) {
-      return err("Access denied: Invalid media target host", "PROXY_ERROR", 403);
+  let mediaUrl = streamInfo.audio.url;
+  let clientName = streamInfo.client;
+  function isValidMediaUrl(targetUrl) {
+    try {
+      const parsed = new URL(targetUrl);
+      return parsed.protocol === "https:" && parsed.hostname.endsWith(".googlevideo.com");
+    } catch (e) {
+      return false;
     }
-  } catch (e) {
-    return err("Invalid media URL resolved", "PROXY_ERROR", 400);
   }
-  const clientUA = CLIENTS[clientName] && CLIENTS[clientName].userAgent || CLIENTS.ANDROID.userAgent;
-  async function fetchUpstream(targetUrl) {
-    const headers = {
+  if (!isValidMediaUrl(mediaUrl)) {
+    return err("Access denied: Invalid media target host", "PROXY_ERROR", 403);
+  }
+  let rangeHeader = request.headers.get("Range") || request.headers.get("range");
+  if (!rangeHeader) {
+    rangeHeader = "bytes=0-1048575";
+  }
+  async function fetchUpstream(targetUrl, currentClientName) {
+    const clientUA = CLIENTS[currentClientName] && CLIENTS[currentClientName].userAgent || CLIENTS.ANDROID.userAgent;
+    const upstreamHeaders = {
       "User-Agent": clientUA,
-      Accept: "*/*"
+      "Accept": request.headers.get("Accept") || "*/*",
+      "Range": rangeHeader,
+      "Accept-Encoding": "identity"
     };
-    const range = request.headers.get("Range");
-    if (range) headers["Range"] = range;
-    const accept = request.headers.get("Accept");
-    if (accept) headers["Accept"] = accept;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12e3);
+    const timeout = setTimeout(() => controller.abort(), 15e3);
     try {
       const res = await fetch(targetUrl, {
         method: request.method === "HEAD" ? "HEAD" : "GET",
-        headers,
+        headers: upstreamHeaders,
         redirect: "follow",
+        cache: "no-store",
         signal: controller.signal
       });
       clearTimeout(timeout);
@@ -837,48 +842,52 @@ async function handleProxy(url, request, env) {
     }
   }
   try {
-    let upstream = await fetchUpstream(mediaUrl);
-    if (upstream.status === 403 || upstream.status === 404 || upstream.status === 410) {
+    let upstreamRes = await fetchUpstream(mediaUrl, clientName);
+    if (upstreamRes.status === 403) {
       for (const name of PLAYER_CLIENT_ORDER) {
         clearVisitorData(name);
       }
       try {
-        const r = await playerWithFallback(id, hl, gl);
-        const best = chooseAudio(listFormats(r.data), itag);
-        if (best && best.url && best.url !== mediaUrl) {
-          mediaUrl = best.url;
-          clientName = r.client;
-          upstream = await fetchUpstream(mediaUrl);
+        const retryStreamInfo = await getFreshAudioStream();
+        if (retryStreamInfo && retryStreamInfo.audio && isValidMediaUrl(retryStreamInfo.audio.url)) {
+          mediaUrl = retryStreamInfo.audio.url;
+          clientName = retryStreamInfo.client;
+          upstreamRes = await fetchUpstream(mediaUrl, clientName);
         }
       } catch (retryErr) {
       }
-    }
-    if (!upstream.ok && upstream.status !== 206) {
-      if (upstream.status === 403) {
-        return err("Upstream media access forbidden (URL may have expired or IP mismatch)", "PROXY_ERROR", 403);
+      if (upstreamRes.status === 403) {
+        return err("Upstream media access forbidden", "PROXY_ERROR", 403);
       }
-      if (upstream.status === 404) {
+    }
+    if (!upstreamRes.ok && upstreamRes.status !== 206) {
+      if (upstreamRes.status === 404) {
         return err("Upstream media stream not found", "PROXY_ERROR", 404);
       }
-      return err("Upstream returned HTTP " + upstream.status, "PROXY_ERROR", 502);
+      return err("Upstream returned HTTP " + upstreamRes.status, "PROXY_ERROR", 502);
     }
     const outHeaders = new Headers(CORS_HEADERS);
-    for (const h of [
+    const headersToForward = [
       "content-type",
       "content-length",
       "content-range",
       "accept-ranges",
-      "last-modified"
-    ]) {
-      const v = upstream.headers.get(h);
+      "cache-control",
+      "last-modified",
+      "etag"
+    ];
+    for (const h of headersToForward) {
+      const v = upstreamRes.headers.get(h);
       if (v) outHeaders.set(h, v);
     }
     if (!outHeaders.has("accept-ranges")) {
       outHeaders.set("accept-ranges", "bytes");
     }
-    outHeaders.set("Cache-Control", "no-cache");
-    return new Response(request.method === "HEAD" ? null : upstream.body, {
-      status: upstream.status,
+    if (!outHeaders.has("cache-control")) {
+      outHeaders.set("cache-control", "no-cache, no-store, must-revalidate");
+    }
+    return new Response(request.method === "HEAD" ? null : upstreamRes.body, {
+      status: upstreamRes.status,
       headers: outHeaders
     });
   } catch (e) {

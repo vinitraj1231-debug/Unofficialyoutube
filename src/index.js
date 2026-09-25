@@ -1004,15 +1004,6 @@ async function handleProxy(url, request, env) {
     rangeHeader = "bytes=0-1048575";
   }
 
-  // Detect if the runtime environment supports RequestInit.cache
-  let supportsRequestCache = false;
-  try {
-    const testReq = new Request("https://localhost", { cache: "no-store" });
-    supportsRequestCache = testReq.cache === "no-store";
-  } catch (e) {
-    supportsRequestCache = false;
-  }
-
   async function fetchUpstream(targetUrl, currentClientName) {
     const clientUA =
       (CLIENTS[currentClientName] && CLIENTS[currentClientName].userAgent) ||
@@ -1023,6 +1014,7 @@ async function handleProxy(url, request, env) {
       "Accept": request.headers.get("Accept") || "*/*",
       "Range": rangeHeader,
       "Accept-Encoding": "identity",
+      "Cache-Control": "no-cache",
     };
 
     const controller = new AbortController();
@@ -1033,13 +1025,8 @@ async function handleProxy(url, request, env) {
       headers: upstreamHeaders,
       redirect: "follow",
       signal: controller.signal,
+      cf: { cacheTtl: 0, cacheEverything: false },
     };
-
-    if (supportsRequestCache) {
-      fetchOptions.cache = "no-store";
-    } else {
-      fetchOptions.cf = { cacheTtl: 0 };
-    }
 
     try {
       const res = await fetch(targetUrl, fetchOptions);

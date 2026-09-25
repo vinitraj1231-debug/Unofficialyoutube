@@ -125,7 +125,7 @@ async function runTests() {
   // Test 10: GET /proxy with valid YouTube ID and Range header
   console.log("10. Testing GET /proxy?id=dQw4w9WgXcQ with Range header...");
   req = new Request("https://example.com/proxy?id=dQw4w9WgXcQ", {
-    headers: { "Range": "bytes=0-100" },
+    headers: { "Range": "bytes=0-1024" },
   });
   res = await worker.fetch(req, env, ctx);
   assert.ok(
@@ -133,6 +133,44 @@ async function runTests() {
     "GET /proxy should return HTTP 200, 206 or handled 403"
   );
   assert.strictEqual(res.headers.get("Access-Control-Allow-Origin"), "*");
+  assert.ok(
+    res.headers.get("Access-Control-Expose-Headers")?.includes("Content-Range"),
+    "CORS expose headers must include Content-Range"
+  );
+  if (res.status === 206) {
+    assert.ok(res.headers.get("Content-Range"), "206 response must include Content-Range header");
+    assert.ok(res.headers.get("Content-Type"), "206 response must include Content-Type header");
+  }
+
+  // Test 10b: GET /proxy without Range header (default range check)
+  console.log("10b. Testing GET /proxy?id=dQw4w9WgXcQ without Range header...");
+  req = new Request("https://example.com/proxy?id=dQw4w9WgXcQ");
+  res = await worker.fetch(req, env, ctx);
+  assert.ok(
+    res.status === 200 || res.status === 206 || res.status === 403,
+    "GET /proxy without Range should return HTTP 200, 206 or handled 403"
+  );
+
+  // Test 10c: HEAD /proxy?id=dQw4w9WgXcQ
+  console.log("10c. Testing HEAD /proxy?id=dQw4w9WgXcQ...");
+  req = new Request("https://example.com/proxy?id=dQw4w9WgXcQ", {
+    method: "HEAD",
+    headers: { "Range": "bytes=0-1024" },
+  });
+  res = await worker.fetch(req, env, ctx);
+  assert.ok(
+    res.status === 200 || res.status === 206 || res.status === 403,
+    "HEAD /proxy should return HTTP 200, 206 or handled 403"
+  );
+
+  // Test 10d: GET /proxy with invalid ID
+  console.log("10d. Testing GET /proxy with invalid ID...");
+  req = new Request("https://example.com/proxy?id=invalid_id");
+  res = await worker.fetch(req, env, ctx);
+  assert.strictEqual(res.status, 400, "GET /proxy with invalid ID should return HTTP 400");
+  body = await res.json();
+  assert.strictEqual(body.ok, false);
+  assert.strictEqual(body.code, "INVALID_VIDEO_ID");
 
   // Test 11: GET /unknown_route
   console.log("11. Testing unknown route...");

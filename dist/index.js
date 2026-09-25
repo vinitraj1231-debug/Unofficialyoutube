@@ -816,6 +816,13 @@ async function handleProxy(url, request, env) {
   if (!rangeHeader) {
     rangeHeader = "bytes=0-1048575";
   }
+  let supportsRequestCache = false;
+  try {
+    const testReq = new Request("https://localhost", { cache: "no-store" });
+    supportsRequestCache = testReq.cache === "no-store";
+  } catch (e) {
+    supportsRequestCache = false;
+  }
   async function fetchUpstream(targetUrl, currentClientName) {
     const clientUA = CLIENTS[currentClientName] && CLIENTS[currentClientName].userAgent || CLIENTS.ANDROID.userAgent;
     const upstreamHeaders = {
@@ -826,14 +833,19 @@ async function handleProxy(url, request, env) {
     };
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15e3);
+    const fetchOptions = {
+      method: request.method === "HEAD" ? "HEAD" : "GET",
+      headers: upstreamHeaders,
+      redirect: "follow",
+      signal: controller.signal
+    };
+    if (supportsRequestCache) {
+      fetchOptions.cache = "no-store";
+    } else {
+      fetchOptions.cf = { cacheTtl: 0 };
+    }
     try {
-      const res = await fetch(targetUrl, {
-        method: request.method === "HEAD" ? "HEAD" : "GET",
-        headers: upstreamHeaders,
-        redirect: "follow",
-        cache: "no-store",
-        signal: controller.signal
-      });
+      const res = await fetch(targetUrl, fetchOptions);
       clearTimeout(timeout);
       return res;
     } catch (e) {

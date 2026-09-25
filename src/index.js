@@ -997,12 +997,7 @@ async function handleProxy(url, request, env) {
     return err("Access denied: Invalid media target host", "PROXY_ERROR", 403);
   }
 
-  let rangeHeader = request.headers.get("Range") || request.headers.get("range");
-  if (!rangeHeader) {
-    // If client does not send Range header, default to initial 1MB range
-    // to avoid full unbounded stream requests
-    rangeHeader = "bytes=0-1048575";
-  }
+  const clientRange = request.headers.get("Range") || request.headers.get("range");
 
   // Detect if the runtime environment supports RequestInit.cache
   let supportsRequestCache = false;
@@ -1015,15 +1010,19 @@ async function handleProxy(url, request, env) {
 
   async function fetchUpstream(targetUrl, currentClientName) {
     const clientUA =
+      request.headers.get("User-Agent") ||
       (CLIENTS[currentClientName] && CLIENTS[currentClientName].userAgent) ||
       CLIENTS.ANDROID.userAgent;
 
     const upstreamHeaders = {
       "User-Agent": clientUA,
       "Accept": request.headers.get("Accept") || "*/*",
-      "Range": rangeHeader,
       "Accept-Encoding": "identity",
     };
+
+    if (clientRange) {
+      upstreamHeaders["Range"] = clientRange;
+    }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);

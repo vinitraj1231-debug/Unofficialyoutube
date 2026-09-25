@@ -130,7 +130,7 @@ async function runTests() {
   res = await worker.fetch(req, env, ctx);
   assert.ok(
     res.status === 200 || res.status === 206 || res.status === 403,
-    "GET /proxy should return HTTP 200, 206 or handled 403"
+    "GET /proxy with Range should return HTTP 200, 206 or handled 403"
   );
   assert.strictEqual(res.headers.get("Access-Control-Allow-Origin"), "*");
   assert.ok(
@@ -142,14 +142,18 @@ async function runTests() {
     assert.ok(res.headers.get("Content-Type"), "206 response must include Content-Type header");
   }
 
-  // Test 10b: GET /proxy without Range header (default range check)
+  // Test 10b: GET /proxy without Range header (normal GET full stream)
   console.log("10b. Testing GET /proxy?id=dQw4w9WgXcQ without Range header...");
   req = new Request("https://example.com/proxy?id=dQw4w9WgXcQ");
   res = await worker.fetch(req, env, ctx);
   assert.ok(
-    res.status === 200 || res.status === 206 || res.status === 403,
-    "GET /proxy without Range should return HTTP 200, 206 or handled 403"
+    res.status === 200 || res.status === 403,
+    "GET /proxy without Range header should return HTTP 200 (or handled 403 if upstream forbidden)"
   );
+  if (res.status === 200) {
+    assert.ok(res.headers.get("Content-Type"), "200 response must include Content-Type header");
+    assert.strictEqual(res.headers.get("Access-Control-Allow-Origin"), "*");
+  }
 
   // Test 10c: HEAD /proxy?id=dQw4w9WgXcQ
   console.log("10c. Testing HEAD /proxy?id=dQw4w9WgXcQ...");
